@@ -1,10 +1,10 @@
 namespace AnonimizarDados.Dtos;
 
-public class ParametrosExclusao : TemplateParametrosDeBanco
+public class InstrucaoExclusao : DefinicaoTabela
 {
     public ushort Prioridade { get; set; }
 
-    public ParametrosExclusao()
+    public InstrucaoExclusao()
     {
         Prioridade = 0;
     }

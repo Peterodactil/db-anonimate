@@ -1,8 +1,9 @@
-﻿using AnonimizarDados.Dtos;
+using AnonimizarDados.Dtos;
+using AnonimizarDados.Enums;
 using AnonimizarDados.Servicos;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,8 +25,15 @@ internal static class Program
 
         var configuracao = LerArquivoDeConfiguracao();
 
-        var parametros = configuracao.GetSection("Parametros").Get<Parametros>();
-        var stringConexao = configuracao.GetConnectionString("Banco");
+        var conexoes = configuracao.GetSection("ConnectionStrings").Get<Conexoes>();
+
+        if (conexoes is null || string.IsNullOrEmpty(conexoes.ObterStringConexao()))
+        {
+            Console.WriteLine("Nenhuma string de conexão definida.");
+            return;
+        }
+
+        var parametros = configuracao.GetSection(nameof(Instrucoes)).Get<Instrucoes>();
 
         if (parametros is null)
         {
@@ -33,41 +41,54 @@ internal static class Program
             return;
         }
 
-        if (string.IsNullOrEmpty(stringConexao))
-        {
-            Console.WriteLine("String de conexão não informada.");
-            return;
-        }
+        var stringConexao = conexoes.ObterStringConexao();
 
-        if (!TestarConexaoComBanco(stringConexao))
+        IDataBaseService servico = conexoes.TipoBanco() switch
         {
-            return;
-        }
+            TipoServicoBanco.Postgres => new PostgresService(stringConexao),
+            _ => new SqlServerService(stringConexao),
+        };
+
+        if (!servico.TestarConexaoComBanco()) return;
 
         if (parametros.AtualizarPorValor.Any())
         {
-            await new AtualizarDadosPorValorServico(stringConexao).AtualizarAsync(
-                parametros.AtualizarPorValor,
+            var dadosMapeados = parametros.AtualizarPorValor.GroupBy(
+                keySelector: p => p,
+                elementSelector: p => new KeyValuePair<string, object?>(p.Coluna, p.Valor.Equals("null") ? null : p.Valor),
+                resultSelector: (g, p) => new InstrucaoAtualizacaoPorValor(g, p),
+                comparer: new ParametrosAtualizacaoDeValorEqualityComparer())
+            .ToList();
+
+            await servico.AtualizarAsync(
+                dadosMapeados,
                 TokenSource.Token);
         }
 
         if (parametros.AtualizarPorRegra.Any())
         {
-            await new AtualizarDadosPorRegraServico(stringConexao).AtualizarAsync(
-                parametros.AtualizarPorRegra,
+            var dadosMapeados = parametros.AtualizarPorRegra.GroupBy(
+                keySelector: p => p,
+                elementSelector: p => new KeyValuePair<string, RegrasEnum>(p.Coluna, p.Regra),
+                resultSelector: (g, p) => new InstrucaoAtualizacaoPorRegra(g, g.ColunaId, p),
+                comparer: new ParametrosAtualizacaoDeRegraEqualityComparer())
+            .ToList();
+
+            await servico.AtualizarAsync(
+                dadosMapeados,
                 TokenSource.Token);
         }
 
         if (parametros.Excluir.Any())
         {
-            await new ExcluirDadosServico(stringConexao).ExcluirAsync(
+            await servico.ExcluirAsync(
                 parametros.Excluir,
                 TokenSource.Token);
         }
 
         if (parametros.Truncar.Any())
         {
-            await new ExcluirDadosServico(stringConexao).TruncarAsync(
+            await servico.TruncarAsync(
                 parametros.Truncar,
                 TokenSource.Token);
         }
@@ -82,33 +103,5 @@ internal static class Program
             .AddJsonFile("appsettings.json", false, true);
 
         return configurationBuilder.Build();
-    }
-
-    private static bool TestarConexaoComBanco(string stringConexao)
-    {
-        using var conexao = new SqlConnection(stringConexao);
-
-        try
-        {
-            conexao.Open();
-
-            if (conexao.Database.EndsWith("_RANDOM"))
-                return true;
-
-            Console.WriteLine("Banco de dados inválido. Aponte para um banco de dados com final '_RANDOM'.");
-
-            return false;
-        }
-        catch (SqlException ex)
-        {
-            Console.WriteLine("Falha ao conectar no banco de dados.");
-            Console.WriteLine(ex.Message);
-
-            return false;
-        }
-        finally
-        {
-            conexao.Close();
-        }
     }
 }

@@ -1,6 +1,6 @@
 namespace AnonimizarDados.Dtos;
 
-public abstract class TemplateParametrosDeBanco
+public class DefinicaoTabela
 {
     public string Esquema { get; set; }
     
@@ -8,7 +8,7 @@ public abstract class TemplateParametrosDeBanco
 
     public string NomeCompletoTabela => $"{Esquema}.{Tabela}";
 
-    protected TemplateParametrosDeBanco()
+    protected DefinicaoTabela()
     {
         Esquema = string.Empty;
         Tabela = string.Empty;
